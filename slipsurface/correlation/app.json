@@ -1,0 +1,12 @@
+{
+  "key": "correlation",
+  "name": "Correlation",
+  "tr": "Zemin Korelasyonları",
+  "group": "Foundations",
+  "description": "SPT, CPT and laboratory correlations",
+  "description_tr": "SPT, CPT ve laboratuvar deneylerinden zemin parametreleri.",
+  "version": "2026.0.0",
+  "requires_core": ">=0.1.0",
+  "order": 5,
+  "session": "slipsurface.correlation.web.session"
+}
