@@ -182,17 +182,15 @@ class CorrelationWindow(QMainWindow):
         self.btn_save = QPushButton("Save Project")
         self.btn_save.setStyleSheet(f"background: white; color: {ACCENT}; border: 1px solid {BORDER};")
         self.btn_save.clicked.connect(self.save_project)
-        self.btn_dark = QPushButton("Dark")
-        self.btn_dark.setStyleSheet(f"background: #1f2937; color: white;")
-        self.btn_dark.clicked.connect(self.toggle_dark)
         btn_row.addWidget(self.btn_analyse)
         btn_row.addWidget(self.btn_save)
-        btn_row.addWidget(self.btn_dark)
+        btn_row.addStretch()
         left_lay_outer = QVBoxLayout()
         left_lay_outer.addLayout(left_lay)
         left_lay_outer.addLayout(btn_row)
         left_container = QWidget()
         left_container.setLayout(left_lay_outer)
+        left_container.setMinimumWidth(480)
         splitter.addWidget(left_container)
 
         # Right: results + plots
@@ -224,6 +222,27 @@ class CorrelationWindow(QMainWindow):
         splitter.setSizes([520, 700])
 
         self._build_menu()
+        self._build_toolbar()
+
+    def _build_toolbar(self):
+        from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen
+        tb = self.addToolBar("Main")
+        tb.setMovable(False)
+        # Dark mode icon
+        pm = QPixmap(24, 24)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setPen(QPen(QColor("#111827"), 2))
+        p.setBrush(QColor("#1f2937"))
+        p.drawEllipse(4, 4, 16, 16)
+        p.setBrush(QColor("#fbbf24"))
+        p.drawEllipse(10, 6, 8, 8)
+        p.end()
+        act_dark = QAction(QIcon(pm), "Dark mode", self)
+        act_dark.setCheckable(True)
+        act_dark.triggered.connect(self.toggle_dark)
+        tb.addAction(act_dark)
+        self.act_dark = act_dark
 
     def _build_menu(self):
         menu = self.menuBar()
@@ -250,13 +269,14 @@ class CorrelationWindow(QMainWindow):
     def _build_sidebar_pages(self):
         sch = schema(self.lang)
         pages = []
-        # Tables
-        for key in ("soil_profile", "spt_tests", "cpt_tests", "vs_tests"):
-            if key in sch:
-                pages.append((key.replace("_", " ").title(), self._make_table_page(key, sch[key])))
-        # Groups
-        for part in sch:
-            if part not in ("soil_profile", "spt_tests", "cpt_tests", "vs_tests") and isinstance(sch[part], dict) and "groups" in sch[part]:
+        # Table-based inputs (soil, spt, cpt, vs)
+        for key in ("soil", "spt", "cpt", "vs"):
+            if key in sch and "columns" in sch[key]:
+                title = {"soil": "Soil Profile", "spt": "SPT Tests", "cpt": "CPT Tests", "vs": "VS Tests"}.get(key, key.title())
+                pages.append((title, self._make_table_page(key, sch[key])))
+        # Group-based inputs
+        for part in ("project", "tests", "options"):
+            if part in sch and "groups" in sch[part]:
                 pages.append((part.capitalize(), self._make_groups_page(part, sch[part])))
         for title, widget in pages:
             self.sidebar.addItem(title)
@@ -399,10 +419,12 @@ class CorrelationWindow(QMainWindow):
         self._dark = not self._dark
         if self._dark:
             self.setStyleSheet(MODERN_STYLE.replace(BG, "#111827").replace(CARD, "#1f2937").replace(TEXT, "#f9fafb").replace(MUTED, "#9ca3af").replace(BORDER, "#374151"))
-            self.btn_dark.setText("Light")
+            if hasattr(self, "act_dark"):
+                self.act_dark.setText("Light")
         else:
             self.setStyleSheet(MODERN_STYLE)
-            self.btn_dark.setText("Dark")
+            if hasattr(self, "act_dark"):
+                self.act_dark.setText("Dark")
         self.status.showMessage("Dark mode" if self._dark else "Light mode")
 
     def run_analysis(self):
