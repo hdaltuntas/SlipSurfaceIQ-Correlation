@@ -22,8 +22,19 @@ from PySide6.QtWidgets import (
 )
 
 from slipsurface.correlation.forms import schema, defaults, to_config, from_config, project_file
-from slipsurface.correlation.engine import analyse
+from slipsurface.correlation.engine import CorrelationAnalysis
+from slipsurface.correlation.plotting import Plotter, PLOT_KEYS
 from slipsurface.correlation import APP_NAME, __version__
+
+# Matplotlib
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    HAS_MPL = True
+except ImportError:
+    HAS_MPL = False
+    FigureCanvas = None
+    Figure = None
 
 # Modern palette
 BG = "#f7f8fa"
@@ -139,17 +150,42 @@ class CorrelationWindow(QMainWindow):
         self.btn_save = QPushButton("Save Project")
         self.btn_save.setStyleSheet(f"background: white; color: {ACCENT}; border: 1px solid {BORDER};")
         self.btn_save.clicked.connect(self.save_project)
+        self.btn_dark = QPushButton("Dark")
+        self.btn_dark.setStyleSheet(f"background: #1f2937; color: white;")
+        self.btn_dark.clicked.connect(self.toggle_dark)
         btn_row.addWidget(self.btn_analyse)
         btn_row.addWidget(self.btn_save)
+        btn_row.addWidget(self.btn_dark)
         btn_row.addStretch()
         left_lay.addLayout(btn_row)
         splitter.addWidget(left)
 
-        # Right results
+        # Right: results + plots
+        right = QTabWidget()
         self.results = QTextEdit()
         self.results.setReadOnly(True)
         self.results.setPlaceholderText("Results will appear here…")
-        splitter.addWidget(self.results)
+        right.addTab(self.results, "Results")
+
+        plot_w = QWidget()
+        pl = QVBoxLayout(plot_w)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Figure"))
+        self.plot_combo = QComboBox()
+        self.plot_combo.addItems(PLOT_KEYS)
+        self.plot_combo.currentTextChanged.connect(self._update_plot)
+        top.addWidget(self.plot_combo)
+        top.addStretch()
+        pl.addLayout(top)
+        if HAS_MPL:
+            self.fig = Figure(figsize=(6, 4), dpi=100)
+            self.canvas = FigureCanvas(self.fig)
+            pl.addWidget(self.canvas)
+        else:
+            self.canvas = QLabel("Plots unavailable")
+            pl.addWidget(self.canvas)
+        right.addTab(plot_w, "Plots")
+        splitter.addWidget(right)
         splitter.setSizes([520, 700])
 
         self._build_menu()
@@ -291,18 +327,45 @@ class CorrelationWindow(QMainWindow):
             vals[name] = rows
         return vals
 
+    def toggle_dark(self):
+        if not hasattr(self, "_dark"):
+            self._dark = False
+        self._dark = not self._dark
+        if self._dark:
+            self.setStyleSheet(MODERN_STYLE.replace(BG, "#111827").replace(CARD, "#1f2937").replace(TEXT, "#f9fafb").replace(MUTED, "#9ca3af").replace(BORDER, "#374151"))
+            self.btn_dark.setText("Light")
+        else:
+            self.setStyleSheet(MODERN_STYLE)
+            self.btn_dark.setText("Dark")
+        self.status.showMessage("Dark mode" if self._dark else "Light mode")
+
     def run_analysis(self):
         try:
             vals = self._collect_values()
             cfg = to_config(vals)
-            result = analyse(cfg)
-            self.last_result = result
-            text = json.dumps(vars(result) if hasattr(result, "__dict__") else result,
-                              indent=2, default=str, ensure_ascii=False)[:12000]
+            analysis = CorrelationAnalysis(cfg)
+            analysis.run()
+            self.last_result = analysis
+            text = json.dumps(vars(analysis), indent=2, default=str, ensure_ascii=False)[:12000]
             self.results.setPlainText(text)
             self.status.showMessage("Analysis complete")
+            self._update_plot()
         except Exception as e:
             QMessageBox.critical(self, "Analysis error", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
+
+    def _update_plot(self):
+        if not HAS_MPL or not hasattr(self, "last_result"):
+            return
+        key = self.plot_combo.currentText()
+        try:
+            self.fig.clear()
+            Plotter(self.last_result, self.lang).draw(key, self.fig)
+            self.canvas.draw()
+        except Exception as exc:
+            self.fig.clear()
+            ax = self.fig.add_subplot(111)
+            ax.text(0.5, 0.5, str(exc), ha="center", va="center")
+            self.canvas.draw()
 
     def open_project(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open", "", "JSON (*.json)")

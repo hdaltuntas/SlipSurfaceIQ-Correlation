@@ -9,8 +9,9 @@ Standalone application extracted from SlipSurfaceIQ-Suite with a contemporary ca
 - SPT, CPT, VS and lab test correlations
 - Layered soil profile
 - Multiple published correlations for φ′, cu, Es, etc.
-- English / Turkish
-- Project save/load
+- Interactive plots (profile, SPT, CPT, strength, stiffness, plasticity…)
+- Dark / light mode toggle
+- Modern card-based UI
 
 ## Run
 
