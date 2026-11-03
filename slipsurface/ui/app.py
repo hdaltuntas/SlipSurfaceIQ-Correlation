@@ -25,6 +25,7 @@ from slipsurface.correlation.forms import schema, defaults, to_config, from_conf
 from slipsurface.correlation.engine import CorrelationAnalysis
 from slipsurface.correlation.plotting import Plotter, PLOT_KEYS
 from slipsurface.correlation import APP_NAME, __version__
+from slipsurface.ui.icons import icon
 
 # Matplotlib
 try:
@@ -225,9 +226,24 @@ class CorrelationWindow(QMainWindow):
         self._build_toolbar()
 
     def _build_toolbar(self):
-        from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen
         tb = self.addToolBar("Main")
         tb.setMovable(False)
+
+        act_open = QAction(icon("open"), "Open", self)
+        act_open.triggered.connect(self.open_project)
+        act_save = QAction(icon("save"), "Save", self)
+        act_save.triggered.connect(self.save_project)
+        act_analyse = QAction(icon("analyse"), "Analyse", self)
+        act_analyse.triggered.connect(self.run_analysis)
+        act_refresh = QAction(icon("refresh"), "Refresh Plot", self)
+        act_refresh.triggered.connect(self._update_plot)
+        act_export = QAction(icon("export"), "Export Plot", self)
+        act_export.triggered.connect(self.export_plot)
+        act_help = QAction(icon("help"), "Help", self)
+        act_help.triggered.connect(self.show_help)
+        act_lang = QAction(icon("language"), "Language", self)
+        act_lang.triggered.connect(self.toggle_language)
+
         # Dark mode icon
         pm = QPixmap(24, 24)
         pm.fill(Qt.transparent)
@@ -241,8 +257,19 @@ class CorrelationWindow(QMainWindow):
         act_dark = QAction(QIcon(pm), "Dark mode", self)
         act_dark.setCheckable(True)
         act_dark.triggered.connect(self.toggle_dark)
-        tb.addAction(act_dark)
         self.act_dark = act_dark
+
+        tb.addAction(act_open)
+        tb.addAction(act_save)
+        tb.addSeparator()
+        tb.addAction(act_analyse)
+        tb.addSeparator()
+        tb.addAction(act_refresh)
+        tb.addAction(act_export)
+        tb.addSeparator()
+        tb.addAction(act_dark)
+        tb.addAction(act_lang)
+        tb.addAction(act_help)
 
     def _build_menu(self):
         menu = self.menuBar()
@@ -413,7 +440,42 @@ class CorrelationWindow(QMainWindow):
                 self.tables.pop(name, None)
         return vals
 
+    def toggle_language(self):
+        self.set_language("tr" if self.lang == "en" else "en")
+
+    def export_plot(self):
+        if not HAS_MPL or not hasattr(self, "fig"):
+            QMessageBox.information(self, "Export", "No plot available.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export plot", "plot.png", "PNG (*.png);;PDF (*.pdf)")
+        if path:
+            self.fig.savefig(path, dpi=150, bbox_inches="tight")
+            self.status.showMessage(f"Plot saved to {path}")
+
+    def show_help(self):
+        QMessageBox.information(
+            self, "Help",
+            f"{APP_NAME} {__version__}\n\n"
+            "1. Enter soil / SPT / CPT / VS data in the sidebar\n"
+            "2. Analyse\n"
+            "3. View results and plots\n\n"
+            "Use the toolbar icons for Open, Save, Dark mode, Language."
+        )
+
     def toggle_dark(self):
+        if not hasattr(self, "_dark"):
+            self._dark = False
+        self._dark = not self._dark
+        if self._dark:
+            self.setStyleSheet(MODERN_STYLE.replace(BG, "#111827").replace(CARD, "#1f2937")
+                               .replace(TEXT, "#f9fafb").replace(MUTED, "#9ca3af").replace(BORDER, "#374151"))
+            if hasattr(self, "act_dark"):
+                self.act_dark.setText("Light")
+        else:
+            self.setStyleSheet(MODERN_STYLE)
+            if hasattr(self, "act_dark"):
+                self.act_dark.setText("Dark")
+        self.status.showMessage("Dark mode" if self._dark else "Light mode")
         if not hasattr(self, "_dark"):
             self._dark = False
         self._dark = not self._dark
