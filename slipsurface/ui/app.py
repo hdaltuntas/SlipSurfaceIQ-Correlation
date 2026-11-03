@@ -11,14 +11,14 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 from PySide6.QtGui import QColor, QPalette, QAction, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QScrollArea, QFormLayout, QGroupBox, QLabel, QLineEdit,
     QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QSplitter,
-    QStatusBar, QFrame, QStackedWidget,
+    QStatusBar, QFrame, QStackedWidget, QListWidget, QListWidgetItem,
 )
 
 from slipsurface.correlation.forms import schema, defaults, to_config, from_config, project_file
@@ -137,13 +137,45 @@ class CorrelationWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
 
-        # Left inputs
+        # Left: sidebar + stacked content
         left = QWidget()
-        left_lay = QVBoxLayout(left)
+        left_lay = QHBoxLayout(left)
         left_lay.setContentsMargins(0, 0, 8, 0)
-        self.input_tabs = QTabWidget()
-        left_lay.addWidget(self.input_tabs)
-        self._build_input_tabs()
+        left_lay.setSpacing(12)
+
+        # Sidebar
+        self.sidebar = QListWidget()
+        self.sidebar.setFixedWidth(180)
+        self.sidebar.setStyleSheet(f"""
+            QListWidget {{
+                background: {CARD};
+                border: 1px solid {BORDER};
+                border-radius: 12px;
+                padding: 8px;
+                outline: none;
+            }}
+            QListWidget::item {{
+                padding: 10px 12px;
+                border-radius: 8px;
+                margin: 2px 0;
+            }}
+            QListWidget::item:selected {{
+                background: {ACCENT};
+                color: white;
+                font-weight: 600;
+            }}
+            QListWidget::item:hover:!selected {{
+                background: #f3f4f6;
+            }}
+        """)
+        left_lay.addWidget(self.sidebar)
+
+        # Stacked pages
+        self.stack = QStackedWidget()
+        left_lay.addWidget(self.stack, 1)
+        self._build_sidebar_pages()
+        self.sidebar.currentRowChanged.connect(self._animate_to_page)
+
         btn_row = QHBoxLayout()
         self.btn_analyse = QPushButton("Analyse")
         self.btn_analyse.clicked.connect(self.run_analysis)
@@ -156,9 +188,12 @@ class CorrelationWindow(QMainWindow):
         btn_row.addWidget(self.btn_analyse)
         btn_row.addWidget(self.btn_save)
         btn_row.addWidget(self.btn_dark)
-        btn_row.addStretch()
-        left_lay.addLayout(btn_row)
-        splitter.addWidget(left)
+        left_lay_outer = QVBoxLayout()
+        left_lay_outer.addLayout(left_lay)
+        left_lay_outer.addLayout(btn_row)
+        left_container = QWidget()
+        left_container.setLayout(left_lay_outer)
+        splitter.addWidget(left_container)
 
         # Right: results + plots
         right = QTabWidget()
@@ -203,26 +238,46 @@ class CorrelationWindow(QMainWindow):
 
     def set_language(self, lang: str):
         self.lang = lang
-        while self.input_tabs.count():
-            self.input_tabs.removeTab(0)
+        while self.stack.count():
+            self.stack.removeWidget(self.stack.widget(0))
+        self.sidebar.clear()
         self.fields.clear()
         self.tables.clear()
         self.values = defaults(lang)
-        self._build_input_tabs()
+        self._build_sidebar_pages()
         self.status.showMessage(f"Language: {lang}")
 
-    def _build_input_tabs(self):
+    def _build_sidebar_pages(self):
         sch = schema(self.lang)
-        # Soil + tests as tables
+        pages = []
+        # Tables
         for key in ("soil_profile", "spt_tests", "cpt_tests", "vs_tests"):
             if key in sch:
-                self._add_table_tab(key, sch[key])
-        # Other groups
+                pages.append((key.replace("_", " ").title(), self._make_table_page(key, sch[key])))
+        # Groups
         for part in sch:
             if part not in ("soil_profile", "spt_tests", "cpt_tests", "vs_tests") and isinstance(sch[part], dict) and "groups" in sch[part]:
-                self._add_groups_tab(part, sch[part])
+                pages.append((part.capitalize(), self._make_groups_page(part, sch[part])))
+        for title, widget in pages:
+            self.sidebar.addItem(title)
+            self.stack.addWidget(widget)
+        if self.sidebar.count():
+            self.sidebar.setCurrentRow(0)
 
-    def _add_table_tab(self, name: str, spec: dict):
+    def _animate_to_page(self, index: int):
+        if index < 0 or index >= self.stack.count():
+            return
+        # Simple fade-like opacity animation on the stack
+        anim = QPropertyAnimation(self.stack, b"windowOpacity")
+        anim.setDuration(180)
+        anim.setStartValue(0.6)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.stack.setCurrentIndex(index)
+        anim.start()
+        self._page_anim = anim  # keep reference
+
+    def _make_table_page(self, name: str, spec: dict) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         w = QWidget()
@@ -248,9 +303,9 @@ class CorrelationWindow(QMainWindow):
         lay.addWidget(add)
         scroll.setWidget(w)
         self.tables[name] = table
-        self.input_tabs.addTab(scroll, name.replace("_", " ").title())
+        return scroll
 
-    def _add_groups_tab(self, name: str, part: dict):
+    def _make_groups_page(self, name: str, part: dict) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         w = QWidget()
@@ -265,7 +320,7 @@ class CorrelationWindow(QMainWindow):
             lay.addWidget(gb)
         lay.addStretch()
         scroll.setWidget(w)
-        self.input_tabs.addTab(scroll, name.capitalize())
+        return scroll
 
     def _make_field(self, field: dict):
         kind = field.get("kind", "number")
