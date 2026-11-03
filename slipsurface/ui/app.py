@@ -347,39 +347,50 @@ class CorrelationWindow(QMainWindow):
 
     def _collect_values(self) -> dict:
         vals = dict(self.values)
-        for key, widget in self.fields.items():
-            if isinstance(widget, QComboBox):
-                vals[key] = widget.currentData()
-            elif isinstance(widget, QCheckBox):
-                vals[key] = widget.isChecked()
-            elif isinstance(widget, (QDoubleSpinBox, QSpinBox)):
-                vals[key] = widget.value()
-            elif isinstance(widget, QLineEdit):
-                vals[key] = widget.text()
-        for name, table in self.tables.items():
-            sch = schema(self.lang).get(name, {})
-            cols = sch.get("columns", [])
-            rows = []
-            for r in range(table.rowCount()):
-                row = {}
-                has = False
-                for c, col in enumerate(cols):
-                    item = table.item(r, c)
-                    text = (item.text() if item else "").strip()
-                    key = col["key"]
-                    kind = col.get("kind", "text")
-                    if kind == "number":
-                        try:
-                            row[key] = float(text) if text else 0.0
-                        except ValueError:
-                            row[key] = 0.0
-                    else:
-                        row[key] = text
-                    if text:
-                        has = True
-                if has:
-                    rows.append(row)
-            vals[name] = rows
+        # Safely collect from widgets (they may have been deleted on language/UI rebuild)
+        dead = []
+        for key, widget in list(self.fields.items()):
+            try:
+                if isinstance(widget, QComboBox):
+                    vals[key] = widget.currentData()
+                elif isinstance(widget, QCheckBox):
+                    vals[key] = widget.isChecked()
+                elif isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+                    vals[key] = widget.value()
+                elif isinstance(widget, QLineEdit):
+                    vals[key] = widget.text()
+            except RuntimeError:
+                # C++ object already deleted
+                dead.append(key)
+        for k in dead:
+            self.fields.pop(k, None)
+        for name, table in list(self.tables.items()):
+            try:
+                sch = schema(self.lang).get(name, {})
+                cols = sch.get("columns", [])
+                rows = []
+                for r in range(table.rowCount()):
+                    row = {}
+                    has = False
+                    for c, col in enumerate(cols):
+                        item = table.item(r, c)
+                        text = (item.text() if item else "").strip()
+                        key = col["key"]
+                        kind = col.get("kind", "text")
+                        if kind == "number":
+                            try:
+                                row[key] = float(text) if text else 0.0
+                            except ValueError:
+                                row[key] = 0.0
+                        else:
+                            row[key] = text
+                        if text:
+                            has = True
+                    if has:
+                        rows.append(row)
+                vals[name] = rows
+            except RuntimeError:
+                self.tables.pop(name, None)
         return vals
 
     def toggle_dark(self):
